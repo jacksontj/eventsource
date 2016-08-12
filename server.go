@@ -54,7 +54,7 @@ func (srv *Server) Close() {
 }
 
 // Create a new handler for serving a specified channel
-func (srv *Server) Handler(channel string) http.HandlerFunc {
+func (srv *Server) Handler(channel string, preloadChannel chan Event) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		h := w.Header()
 		h.Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -79,6 +79,23 @@ func (srv *Server) Handler(channel string) http.HandlerFunc {
 		notifier := w.(http.CloseNotifier)
 		flusher.Flush()
 		enc := NewEncoder(w, useGzip)
+
+		// send all the events in preloadChannel
+		for {
+			ev, ok := <-preloadChannel
+			if !ok {
+				break
+			}
+			if err := enc.Encode(ev); err != nil {
+				srv.unregister <- sub
+				if srv.Logger != nil {
+					srv.Logger.Println(err)
+				}
+				return
+			}
+			flusher.Flush()
+		}
+
 		for {
 			select {
 			case <-notifier.CloseNotify():
